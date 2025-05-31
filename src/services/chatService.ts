@@ -3,6 +3,13 @@ import dotenv from "dotenv";
 import { Aftermath } from "aftermath-ts-sdk";
 import mainnet from "@cetusprotocol/cetus-sui-clmm-sdk";
 import { CoinBalance, getFullnodeUrl, SuiClient } from "@mysten/sui/client";
+import {
+  FindMaxPositionLiquidityArgs,
+  Position,
+  getAllWalletPositions,
+  POSITION_CONFIG_INFOS,
+} from "@kunalabs-io/kai";
+import { constrainedMemory } from "process";
 dotenv.config();
 interface CoinData {
   coinType: string;
@@ -34,6 +41,9 @@ class ChatService {
       case "analyze_portfolio_risk":
         response = await this.analyzePortfolioRisk(userAddress);
         break;
+      case "analyze_positions":
+        response = await this.analyzePositions(userAddress);
+        break;
       default:
         response = await this.generateAIResponse(message);
         break;
@@ -52,7 +62,12 @@ class ChatService {
           messages: [
             {
               role: "user",
-              content: `What is the intent of the following message: "${message}"?. The categories are based on these parameters [greeting, analyze_portfolio_risk], you should return only one of them.`,
+              content: `What is the intent of the following message: "${message}"? The categories are based on these parameters:
+- **greeting**: A message that initiates a conversation or acknowledges the user.
+- **analyze_portfolio_risk**: A request to assess the risk associated with the user's investment portfolio, including factors like volatility, asset allocation, and potential losses.
+- **analyze_positions**: A request to evaluate specific pool portfolio user have on wallet and check it got any change to be liquidated or not, providing insights on individual assets. Give them advice to manage their positions.
+
+You should return only one of them.`,
             },
           ],
         },
@@ -73,6 +88,31 @@ class ChatService {
       return "unknown";
     }
   }
+  private async generateAIResponse(prompt: string): Promise<string> {
+    try {
+      const response = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: "gpt-4.1-nano-2025-04-14",
+          messages: [{ role: "user", content: prompt }],
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${this.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      return (
+        response.data.choices[0]?.message?.content || "No response from AI."
+      );
+    } catch (error) {
+      console.error("Error calling AI API:", error);
+      return "Error generating response.";
+    }
+  }
+
   private async analyzePortfolioRisk(userAddress: string): Promise<string> {
     const client = new SuiClient({ url: getFullnodeUrl("mainnet") });
     try {
@@ -149,28 +189,137 @@ class ChatService {
     return greetings[Math.floor(Math.random() * greetings.length)];
   }
 
-  private async generateAIResponse(prompt: string): Promise<string> {
+  private async getPositionInfo(client: SuiClient, walletAddress: string) {
     try {
-      const response = await axios.post(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          model: "gpt-4.1-nano-2025-04-14",
-          messages: [{ role: "user", content: prompt }],
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${this.OPENAI_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-        }
+      // Lấy tất cả các vị trí thanh khoản của ví
+      const positions = await getAllWalletPositions(client, walletAddress);
+
+      // Xử lý từng vị trí
+      const positionDetails = await Promise.all(
+        positions.data.map(async (position) => {
+          const pool = await position.position.configInfo.fetchPool(client);
+          const [supplyPoolX, supplyPoolY] = await Promise.all([
+            position.position.configInfo.supplyPoolXInfo.fetch(client),
+            position.position.configInfo.supplyPoolYInfo.fetch(client),
+          ]);
+          const configData = await position.position.configInfo.fetchConfig(
+            client
+          );
+          const inRange = position.position.inRange(pool.currentTick());
+          const equity = position.position.calcEquityAmountsHuman({
+            poolPrice: pool.currentPrice(),
+            supplyPoolX,
+            supplyPoolY,
+            timestampMs: Date.now(),
+          });
+          console.log("equity", equity);
+          const debt = position.position.calcDebtAmounts({
+            supplyPoolX,
+            supplyPoolY,
+            timestampMs: Date.now(),
+          });
+          console.log("debt", debt);
+          const lpAmounts = position.position.calcLpAmounts(
+            pool.currentPrice()
+          );
+          console.log("lpAmounts", lpAmounts);
+          const marginLevel = position.position.calcMarginLevel({
+            currentPrice: pool.currentPrice(),
+            supplyPoolX,
+            supplyPoolY,
+            timestampMs: Date.now(),
+          });
+          const liquidationPrices = position.position.calcLiquidationPrices({
+            config: configData,
+            supplyPoolX,
+            supplyPoolY,
+            timestampMs: Date.now(),
+          });
+          const deleveragePrices = position.position.calcDeleveragePrices({
+            config: configData,
+            supplyPoolX,
+            supplyPoolY,
+            timestampMs: Date.now(),
+          });
+          const interestRates = position.position.getInterestRates({
+            supplyPoolX,
+            supplyPoolY,
+            timestampMs: Date.now(),
+          });
+          return {
+            poolName: pool.data.$fullTypeName,
+            typeName: pool.data.$typeName,
+            positionId: position.positionCapId,
+            inRange,
+            equity,
+            debt: {
+              x: debt.x.toString(),
+              y: debt.y.toString(),
+            },
+            lpAmounts: {
+              x: lpAmounts.x.toString(),
+              y: lpAmounts.y.toString(),
+            },
+            marginLevel: marginLevel.toDP(4).toString(),
+            liquidationPrices: {
+              low: liquidationPrices[0].toString(),
+              high: liquidationPrices[1].toString(),
+            },
+            deleveragePrices: {
+              low: deleveragePrices[0].toString(),
+              high: deleveragePrices[1].toString(),
+            },
+            interestRates: {
+              x: interestRates.x.toString(),
+              y: interestRates.y.toString(),
+            },
+          };
+        })
       );
 
-      return (
-        response.data.choices[0]?.message?.content || "No response from AI."
-      );
+      return positionDetails;
     } catch (error) {
-      console.error("Error calling AI API:", error);
-      return "Error generating response.";
+      console.error("Error fetching position info:", error);
+      return [];
+    }
+  }
+
+  public async analyzePositions(userAddress: string): Promise<string> {
+    const client = new SuiClient({ url: getFullnodeUrl("mainnet") });
+
+    try {
+      const positionDetails = await this.getPositionInfo(client, userAddress);
+
+      // Tạo prompt cho AI
+      const prompt = `
+        Analyze the following positions for the wallet ${userAddress}:
+        ${positionDetails
+          .map(
+            (position: any) => `
+              - Position ID: ${position.positionId}
+              - In Range: ${position.inRange}
+              - Equity: ${JSON.stringify(position.equity)}
+              - Debt: ${JSON.stringify(position.debt)}
+              - LP Amounts: ${JSON.stringify(position.lpAmounts)}
+              - Margin Level: ${position.marginLevel}
+              - Liquidation Prices: ${JSON.stringify(
+                position.liquidationPrices
+              )}
+              - Deleverage Prices: ${JSON.stringify(position.deleveragePrices)}
+              - Interest Rates: ${JSON.stringify(position.interestRates)}
+            `
+          )
+          .join("\n")}
+        Based on this information, provide recommendations on how to manage these positions to minimize risk and optimize returns.
+      `;
+
+      // Gọi hàm generateAIResponse
+      const analysis = await this.generateAIResponse(prompt);
+
+      return analysis; // Trả về kết quả phân tích
+    } catch (error) {
+      console.error("Error analyzing positions:", error);
+      return "Error analyzing positions"; // Trả về chuỗi thông báo lỗi
     }
   }
 }
