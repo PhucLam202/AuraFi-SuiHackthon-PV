@@ -1,15 +1,8 @@
 import axios from "axios";
 import dotenv from "dotenv";
-import { Aftermath } from "aftermath-ts-sdk";
-import mainnet from "@cetusprotocol/cetus-sui-clmm-sdk";
 import { CoinBalance, getFullnodeUrl, SuiClient } from "@mysten/sui/client";
-import {
-  FindMaxPositionLiquidityArgs,
-  Position,
-  getAllWalletPositions,
-  POSITION_CONFIG_INFOS,
-} from "@kunalabs-io/kai";
-import { constrainedMemory } from "process";
+import { getAllWalletPositions } from "@kunalabs-io/kai";
+import { Message } from "../types/chat";
 dotenv.config();
 interface CoinData {
   coinType: string;
@@ -26,33 +19,46 @@ class ChatService {
   public async processMessage(
     userAddress: string,
     message: string
-  ): Promise<string> {
-    console.log(`Received message: ${message}`);
-    console.log(`Wallet address: ${userAddress}`);
+  ): Promise<Message> {
     const intent = await this.detectIntent(message);
-    console.log(`Detected intent: ${intent}`);
 
-    let response = "";
+    let aiContent = "";
 
     switch (intent) {
       case "greeting":
-        response = await this.generateGreeting();
+        aiContent = await this.generateGreeting();
         break;
       case "analyze_portfolio_risk":
-        response = await this.analyzePortfolioRisk(userAddress);
+        aiContent = await this.analyzePortfolioRisk(userAddress);
         break;
       case "analyze_positions":
-        response = await this.analyzePositions(userAddress);
+        aiContent = await this.analyzePositions(userAddress);
         break;
       default:
-        response = await this.generateAIResponse(message);
+        aiContent = await this.generateAIResponse(message);
         break;
     }
 
-    console.log(`AI Response: ${response}`);
-    return response;
+    const responseMessage: Message = {
+      id: Date.now().toString(),
+      from: "assistant",
+      content: aiContent,
+      avatar: "https://github.com/openai.png",
+      name: "AI Assistant",
+      timestamp: new Date().toISOString(),
+      codeBlocks: [],
+    };
+
+    return responseMessage;
   }
 
+  /**
+   * Detects the intent of a user's message using the OpenAI API.
+   * This function sends a request to the OpenAI API with the given message
+   * and returns the detected intent as a string.
+   * 
+   * @param message The message to detect the intent of.
+   */
   private async detectIntent(message: string): Promise<string> {
     try {
       const response = await axios.post(
@@ -88,6 +94,13 @@ You should return only one of them.`,
       return "unknown";
     }
   }
+  /**
+   * Generates a response from the AI model.
+   * This function sends a request to the OpenAI API with the given prompt
+   * and returns the response as a string.
+   * 
+   * @param prompt The prompt to send to the AI model.
+   */
   private async generateAIResponse(prompt: string): Promise<string> {
     try {
       const response = await axios.post(
@@ -113,6 +126,12 @@ You should return only one of them.`,
     }
   }
 
+  /**
+   * Analyzes the risk associated with the user's investment portfolio.
+   * This function calculates the total value of the user's portfolio
+   * and uses AI to suggest how to allocate the investment portfolio
+   * to minimize risk and optimize profits based on the 24h price changes.
+   */
   private async analyzePortfolioRisk(userAddress: string): Promise<string> {
     const client = new SuiClient({ url: getFullnodeUrl("mainnet") });
     try {
@@ -136,12 +155,11 @@ You should return only one of them.`,
               `Error fetching DEX Screener for ${url}:`,
               error.message
             );
-            return { data: null }; // Xử lý lỗi cho từng yêu cầu
+            return { data: null };
           })
         )
       );
 
-      // Cập nhật coinData với priceChangeH24
       coinData.forEach((coin, index) => {
         const response = dexscreenerResponses[index].data;
         if (response && response[0]?.priceChange?.h24) {
@@ -151,7 +169,6 @@ You should return only one of them.`,
         }
       });
 
-      // Tính tổng giá trị danh mục (giả định giá USD từ DEX Screener)
       const totalValue = coinData.reduce((sum, coin) => {
         const priceUsd =
           dexscreenerResponses[coinData.indexOf(coin)]?.data?.[0]?.priceUsd ||
@@ -179,6 +196,13 @@ You should return only one of them.`,
       return "Error fetching portfolio";
     }
   }
+
+  /**
+   * Generates a random greeting message for the user.
+   * This function selects a greeting from a predefined list of messages
+   * and returns it as a string. It is used to initiate a conversation
+   * with the user in a friendly manner.
+   */
   private generateGreeting(): string {
     const greetings = [
       "I am your personal assistant specializing in financial management. How can I assist you today?",
@@ -191,10 +215,8 @@ You should return only one of them.`,
 
   private async getPositionInfo(client: SuiClient, walletAddress: string) {
     try {
-      // Lấy tất cả các vị trí thanh khoản của ví
       const positions = await getAllWalletPositions(client, walletAddress);
 
-      // Xử lý từng vị trí
       const positionDetails = await Promise.all(
         positions.data.map(async (position) => {
           const pool = await position.position.configInfo.fetchPool(client);
@@ -212,17 +234,53 @@ You should return only one of them.`,
             supplyPoolY,
             timestampMs: Date.now(),
           });
-          console.log("equity", equity);
+          const initialPriceX =
+            parseFloat(pool.currentPrice().toString()) * 0.3; 
+          const initialPriceY =
+            parseFloat(pool.currentPrice().toString()) * 0.3;
+          if (
+            equity.x.greaterThan(initialPriceX) ||
+            equity.y.greaterThan(initialPriceY)
+          ) {
+            console.warn(
+              `Alert: Equity for Position ID ${position.positionCapId} exceeds 30% of initial price!`
+            );
+          }
+          const dexscreenerUrlX = `https://api.dexscreener.com/token-pairs/v1/SUI/${configData.X.typeName}`;
+          const dexscreenerUrlY = `https://api.dexscreener.com/token-pairs/v1/SUI/${configData.Y.typeName}`;
+          const [responseX, responseY] = await Promise.all([
+            axios.get(dexscreenerUrlX).catch((error) => {
+              console.error(
+                `Error fetching DexScreener for ${dexscreenerUrlX}:`,
+                error.message
+              );
+              return { data: null };
+            }),
+            axios.get(dexscreenerUrlY).catch((error) => {
+              console.error(
+                `Error fetching DexScreener for ${dexscreenerUrlY}:`,
+                error.message
+              );
+              return { data: null };
+            }),
+          ]);
+
+          const priceChangeX = responseX.data?.[0]?.priceChange?.h6 || 0;
+          const priceChangeY = responseY.data?.[0]?.priceChange?.h6 || 0;
+          if (priceChangeX > equity.x) {
+            console.warn(`Alert: Price change for token X exceeds equity!`);
+          }
+          if (priceChangeY > equity.y) {
+            console.warn(`Alert: Price change for token Y exceeds equity!`);
+          }
           const debt = position.position.calcDebtAmounts({
             supplyPoolX,
             supplyPoolY,
             timestampMs: Date.now(),
           });
-          console.log("debt", debt);
           const lpAmounts = position.position.calcLpAmounts(
             pool.currentPrice()
           );
-          console.log("lpAmounts", lpAmounts);
           const marginLevel = position.position.calcMarginLevel({
             currentPrice: pool.currentPrice(),
             supplyPoolX,
@@ -250,6 +308,8 @@ You should return only one of them.`,
             poolName: pool.data.$fullTypeName,
             typeName: pool.data.$typeName,
             positionId: position.positionCapId,
+            priceChangeX,
+            priceChangeY,
             inRange,
             equity,
             debt: {
@@ -284,13 +344,19 @@ You should return only one of them.`,
     }
   }
 
+  /**
+   * Analyzes the positions of a user's wallet.
+   * This function retrieves the position information for a user's wallet
+   * and uses AI to provide recommendations on how to manage their positions.
+   * 
+   * @param userAddress The address of the user's wallet. 
+   */
   public async analyzePositions(userAddress: string): Promise<string> {
     const client = new SuiClient({ url: getFullnodeUrl("mainnet") });
 
     try {
       const positionDetails = await this.getPositionInfo(client, userAddress);
 
-      // Tạo prompt cho AI
       const prompt = `
         Analyze the following positions for the wallet ${userAddress}:
         ${positionDetails
@@ -299,6 +365,8 @@ You should return only one of them.`,
               - Position ID: ${position.positionId}
               - In Range: ${position.inRange}
               - Equity: ${JSON.stringify(position.equity)}
+              - Price Change X: ${position.priceChangeX}
+              - Price Change Y: ${position.priceChangeY}
               - Debt: ${JSON.stringify(position.debt)}
               - LP Amounts: ${JSON.stringify(position.lpAmounts)}
               - Margin Level: ${position.marginLevel}
@@ -310,16 +378,15 @@ You should return only one of them.`,
             `
           )
           .join("\n")}
-        Based on this information, provide recommendations on how to manage these positions to minimize risk and optimize returns.
+        Based on this information, provide recommendations on how to manage these positions to minimize risk and optimize returns. And with price change at 6h, you should give advice to manage their positions.
       `;
 
-      // Gọi hàm generateAIResponse
       const analysis = await this.generateAIResponse(prompt);
 
-      return analysis; // Trả về kết quả phân tích
+      return analysis; 
     } catch (error) {
       console.error("Error analyzing positions:", error);
-      return "Error analyzing positions"; // Trả về chuỗi thông báo lỗi
+      return "Error analyzing positions"; 
     }
   }
 }
