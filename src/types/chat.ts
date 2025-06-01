@@ -5,5 +5,5 @@ export interface Message {
   avatar: string;
   name: string;
   timestamp: string;
-  codeBlocks: any[]; // Bạn có thể định nghĩa kiểu chi tiết hơn cho codeBlocks nếu cần
+  codeBlocks: any[];
 } 
