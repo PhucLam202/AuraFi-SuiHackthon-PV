@@ -16,13 +16,13 @@ class ChatController {
     next: NextFunction
   ): Promise<void> {
     try {
-      const appExpress = new CustomExpress(req, res, next);
       const walletAddress = req.headers.walletaddress as string;
       const message = req.body.message;
-      const response = await this.chatService.processMessage(walletAddress, message);
-      appExpress.response200({ message: response });
+      const responseMessage = await this.chatService.processMessage(walletAddress, message);
+
+      res.status(200).json([responseMessage]);
     } catch (error) {
-      next(error); 
+      next(error);
     }
   }
 }
