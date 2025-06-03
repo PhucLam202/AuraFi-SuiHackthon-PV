@@ -18,7 +18,7 @@ class ChatService {
     message: string
   ): Promise<Message> {
     const intent = await this.aiService.detectIntent(message);
-
+    console.log("intent", intent);
     let aiContent = "";
 
     switch (intent) {
@@ -40,8 +40,10 @@ class ChatService {
       case "get_transaction_history":
         aiContent = await this.analyzeTransactionHistory(userAddress);
         break;
-      default:
+      case "undefined":
         aiContent = await this.aiService.generateAIResponse(message);
+        break;
+      default:
         break;
     }
 
@@ -169,7 +171,7 @@ private async analyzeCoinData(userAddress: string): Promise<string> {
             `- ${coin.coinType}: Balance ${coin.totalBalance}, Value: $${coin.totalBalance || 'N/A'}, 24h Change: ${coin.priceChangeH24 || 'N/A'}%`
         )
         .join("\n")}
-      
+      First of all you show how many coins you have in your wallet and then you show the coinType.
       Please provide:
       1. A summary of the portfolio composition
       2. Performance highlights (best and worst performers)
@@ -206,7 +208,7 @@ private async analyzeNFTData(userAddress: string): Promise<string> {
             `${index + 1}. ${nft.name || 'Unnamed NFT'} - Collection: ${nft.collection || 'Unknown'}, Type: ${nft.type || 'N/A'}`
         )
         .join("\n")}
-      
+      First of all you show how many NFTs you have in your wallet and then you show the NFT collection.
       Please provide:
       1. Overview of the NFT collection (total count, variety)
       2. Collection analysis (which collections are represented)
@@ -230,31 +232,41 @@ private async analyzeNFTData(userAddress: string): Promise<string> {
     private async analyzeTransactionHistory(userAddress: string): Promise<string> {
       try {
         const transactionHistory = await this.suiDataService.getTransactionHistory(userAddress);
-        console.log("transactionHistory", transactionHistory);
         
         if (!transactionHistory || transactionHistory.length === 0) {
           return "📝 **Transaction History**: No recent transactions found for your wallet.";
         }
   
         const prompt = `
-          Analyze the following recent transaction history:
-          ${transactionHistory
-            .slice(0, 10) // Limit to recent 10 transactions for analysis
-            .map(
-              (tx, index) =>
-                `${index + 1}. Type: ${tx.type || 'Unknown'}, Status: ${tx.status || 'N/A'}, Date: ${tx.timestamp || 'N/A'}`
-            )
-            .join("\n")}
-          
-          Please provide:
-          1. Transaction activity summary (frequency, types)
-          2. Spending/earning patterns analysis
-          3. Recent activity highlights
-          4. Any recommendations based on transaction patterns
-          5. Security observations (if any unusual activity)
-          
-          Format the response in markdown with clear sections and use emojis for better readability.
-        `;
+You are a virtual financial assistant reviewing a user's recent on-chain transaction activity.
+
+Here is the user's 10 most recent transactions:
+${transactionHistory
+  .slice(0, 10)
+  .map(
+    (tx, index) =>
+      `${index + 1}. Type: ${tx.type || 'Unknown'}, Status: ${tx.status || 'N/A'}, Date: ${tx.timestamp || 'N/A'}`
+  )
+  .join("\n")}
+
+Please provide a concise and insightful analysis from the perspective of a senior virtual assistant. Keep the tone natural, helpful, and experienced — like you're assisting someone with both practical and security concerns.
+
+Your analysis should include:
+
+### 1. 🔍 Recent Activity Overview
+- What patterns or notable timing do you observe?
+- Does the activity suggest high engagement, automation, or typical usage?
+
+### 2. 💡 Smart Recommendations
+- What actions would you suggest to optimize or protect this wallet's transaction behavior?
+- Mention anything odd or repetitive worth flagging.
+
+### 3. 🔒 Security Insights
+- Do you spot any red flags (e.g., repetitive transactions, time clustering)?
+- Suggest best practices for wallet security and gas efficiency.
+
+Keep the formatting clean using Markdown with emojis. Respond as if you're part of a smart wallet assistant app helping the user understand their blockchain footprint and make informed next steps.
+`;
   
         const analysis = await this.aiService.generateAIResponse(prompt);
         return analysis;

@@ -2,7 +2,37 @@ import axios from "axios";
 import { CoinBalance, getFullnodeUrl, SuiClient } from "@mysten/sui/client";
 import { getAllWalletPositions } from "@kunalabs-io/kai";
 import { NFTAsset } from "../types/NFTs";
-import { Transaction } from "../types/transactionHistory";
+import { Transaction, TransactionType } from "../types/transactionHistory";
+
+interface MessageData {
+  id: string;
+  from: string;
+  content: string;
+  avatar: string;
+  name: string;
+  timestamp: string;
+  codeBlocks: any[];
+}
+
+interface UserMessage {
+  message: string;
+}
+
+interface TransactionSummary {
+  totalTransactions: number;
+  timeRange: {
+    start: Date;
+    end: Date;
+    duration: string;
+  };
+  gasSpending: {
+    total: number;
+    average: number;
+    currency: string;
+  };
+  insights: string[];
+  recommendations: string[];
+}
 
 interface CoinData {
   coinType: string;
@@ -113,7 +143,6 @@ export class SuiDataService {
         
         return !isSystemObject && (hasDisplay || isKnownNFTCollection);
       });
-      console.log("nftObjects", nftObjects);
       // Parse NFT data
       const nfts = await Promise.all(
         nftObjects.map(async (obj) => {
@@ -177,7 +206,6 @@ export class SuiDataService {
           }
         })
       );
-      console.log("nfts", nfts);
       return nfts.filter(nft => nft !== null);
     } catch (error) {
       console.error('Error fetching NFTs:', error);
@@ -476,21 +504,429 @@ export class SuiDataService {
     );  
   }
 
-  private parseTransactionType(tx: any): Transaction['type'] {
+  private parseTransactionType(tx: any): TransactionType {
     // Logic to parse transaction type based on transaction data
-    const kind = tx.transaction?.data?.transaction?.kind;
-    if (kind === 'ProgrammableTransaction') {
-      // Analyze programmable transaction to determine type
-      return 'swap'; 
+    const kind = tx.transaction?.data?.transaction;
+    if (this.isSwapTransaction(tx)) {
+      return TransactionType.SWAP;
     }
-    console.log("kind", kind);
-    return 'transfer';
+
+    // Check for staking transactions
+    if (this.isStakingTransaction(tx)) {
+      return TransactionType.STAKING;
+    }
+
+    // Check for reward claims
+    if (this.isRewardClaimTransaction(tx)) {
+      return TransactionType.CLAIM_REWARD;
+    }
+
+    // Check for transfers
+    if (this.isTransferTransaction(tx)) {
+      return TransactionType.TRANSFER;
+    }
+
+    // Check for NFT minting
+    if (this.isNFTMintTransaction(tx)) {
+      return TransactionType.MINT_NFT;
+    }
+
+    return TransactionType.OTHER;
   }
-  private calculateGasFee(tx: any): number {
-    const gasBudget = tx.transaction?.data?.gasData?.budget || 0;
-    const gasUsed = tx.effects?.gasUsed?.computationCost || 0;
-    console.log("gasBudget", gasBudget);
-    console.log("gasUsed", gasUsed);
-    return Number(gasUsed) / 1e9; // Convert to SUI
+  private isSwapTransaction(txData: any): boolean {
+    // Check for common DEX package IDs on Sui
+    const dexPackages = [
+      '0x1eabed72c53feb3805120a081dc15963c204dc8d091542592abaf7a35689b2fb', // Cetus
+      '0x91bfbc386a41afcfd9b2533058d7e915a1d3829089cc268ff4333d54d6339ca1', // Turbos
+      // Add more DEX package IDs
+    ];
+
+    return txData.transaction?.kind === 'ProgrammableTransaction' &&
+           dexPackages.some(pkg => JSON.stringify(txData).includes(pkg));
+  }
+  private isStakingTransaction(tx: any): boolean {
+    // Check for staking system calls
+    return JSON.stringify(tx).includes('0x3::sui_system') ||
+           JSON.stringify(tx).includes('request_add_stake') ||
+           JSON.stringify(tx).includes('request_withdraw_stake');
+  }
+
+  private isRewardClaimTransaction(tx: any): boolean {
+    return JSON.stringify(tx).includes('claim') ||
+           JSON.stringify(tx).includes('harvest') ||
+           JSON.stringify(tx).includes('collect_reward');
+  }
+
+  private isTransferTransaction(tx: any): boolean {
+    return tx.transaction?.kind === 'ProgrammableTransaction' &&
+           JSON.stringify(tx).includes('transfer');
+  }
+
+  private isNFTMintTransaction(tx: any): boolean {
+    return JSON.stringify(tx).includes('mint') &&
+           (JSON.stringify(tx).includes('nft') || 
+            JSON.stringify(tx).includes('collection'));
+  }
+
+  /**
+   * Calculate gas fee in SUI from transaction data
+   */
+  private calculateGasFee(rawTx: any): number {
+    const gasUsed = rawTx.effects?.gasUsed;
+    if (!gasUsed) return 0;
+
+    const totalGas = (gasUsed.computationCost || 0) + 
+                    (gasUsed.storageCost || 0) - 
+                    (gasUsed.storageRebate || 0);
+    
+    // Convert from MIST to SUI (1 SUI = 10^9 MIST)
+    return totalGas / 1_000_000_000;
+  }
+  // private calculateGasFee(tx: any): number {
+  //   const gasBudget = tx.transaction?.data?.gasData?.budget || 0;
+  //   const gasUsed = tx.effects?.gasUsed?.computationCost || 0;
+  //   return Number(gasUsed) / 1e9; // Convert to SUI
+  // }
+}
+
+class MessageAnalyzer {
+  /**
+   * Parse and format the message data for better AI understanding
+   */
+  static formatMessageForAI(messageData: MessageData[], userMessage: UserMessage): {
+    conversation: any;
+    userIntent: string;
+    context: any;
+  } {
+    // Parse the conversation
+    const conversation = messageData.map(msg => ({
+      role: msg.from === 'assistant' ? 'assistant' : 'user',
+      timestamp: new Date(msg.timestamp),
+      content: this.extractKeyInfo(msg.content),
+      hasCodeBlocks: msg.codeBlocks.length > 0
+    }));
+
+    // Analyze user intent
+    const userIntent = this.analyzeUserIntent(userMessage.message);
+
+    // Extract context from previous conversation
+    const context = this.extractContext(messageData);
+
+    return {
+      conversation: {
+        messages: conversation,
+        totalMessages: conversation.length,
+        hasTransactionAnalysis: context.hasTransactionData,
+        lastActivity: conversation[conversation.length - 1]?.timestamp
+      },
+      userIntent,
+      context
+    };
+  }
+
+  /**
+   * Extract key information from message content
+   */
+  private static extractKeyInfo(content: string): any {
+    // Check if content contains transaction analysis
+    if (content.includes('Transaction Analysis Report')) {
+      return this.parseTransactionReport(content);
+    }
+
+    // Check for other structured data
+    if (content.includes('Total Transactions:')) {
+      return this.parseSimpleStats(content);
+    }
+
+    return {
+      type: 'text',
+      summary: content.substring(0, 200) + (content.length > 200 ? '...' : ''),
+      fullContent: content
+    };
+  }
+
+  /**
+   * Parse transaction report from content
+   */
+  private static parseTransactionReport(content: string): any {
+    const lines = content.split('\n');
+    const report = {
+      type: 'transaction_analysis',
+      totalTransactions: 0,
+      transactionTypes: {} as Record<string, number>,
+      timeframe: '',
+      gasInfo: '',
+      recommendations: [] as string[]
+    };
+
+    lines.forEach(line => {
+      // Extract total transactions
+      if (line.includes('Total Transactions:')) {
+        const match = line.match(/\*\*(\d+)\*\*/);
+        if (match) report.totalTransactions = parseInt(match[1]);
+      }
+
+      // Extract timeframe
+      if (line.includes('Date:') && line.includes('June')) {
+        report.timeframe = line.trim();
+      }
+
+      // Extract recommendations
+      if (line.includes('**') && (line.includes('Clarify') || line.includes('Monitor') || line.includes('Set'))) {
+        report.recommendations.push(line.replace(/\*\*/g, '').trim());
+      }
+    });
+
+    return report;
+  }
+
+  /**
+   * Analyze user intent from their message
+   */
+  private static analyzeUserIntent(message: string): string {
+    const lowerMessage = message.toLowerCase();
+    
+    if (lowerMessage.includes('gas') && lowerMessage.includes('spend')) {
+      return 'gas_analysis';
+    }
+    if (lowerMessage.includes('transaction') && lowerMessage.includes('read')) {
+      return 'transaction_review';
+    }
+    if (lowerMessage.includes('app') && lowerMessage.includes('most')) {
+      return 'app_usage_analysis';
+    }
+    if (lowerMessage.includes('analysis') || lowerMessage.includes('report')) {
+      return 'detailed_analysis';
+    }
+
+    return 'general_inquiry';
+  }
+
+  /**
+   * Extract context from message history
+   */
+  private static extractContext(messageData: MessageData[]): any {
+    const context = {
+      hasTransactionData: false,
+      previousAnalysis: null as any,
+      userConcerns: [] as string[],
+      timeframe: null as string | null
+    };
+
+    messageData.forEach(msg => {
+      if (msg.content.includes('Transaction Analysis Report')) {
+        context.hasTransactionData = true;
+        context.previousAnalysis = this.parseTransactionReport(msg.content);
+      }
+      
+      if (msg.from !== 'assistant' && msg.content.includes('gas')) {
+        context.userConcerns.push('gas_costs');
+      }
+    });
+
+    return context;
+  }
+
+  /**
+   * Generate improved response structure for AI
+   */
+  static generateImprovedResponse(
+    userIntent: string, 
+    context: any, 
+    transactionData?: any[]
+  ): {
+    responseType: string;
+    focusAreas: string[];
+    suggestedFormat: string;
+    dataPoints: string[];
+  } {
+    const response = {
+      responseType: 'structured_analysis',
+      focusAreas: [] as string[],
+      suggestedFormat: 'markdown_report',
+      dataPoints: [] as string[]
+    };
+
+    switch (userIntent) {
+      case 'gas_analysis':
+        response.focusAreas = [
+          'Total gas spent across all transactions',
+          'Average gas cost per transaction',
+          'Most expensive transactions (by gas)',
+          'Gas efficiency by app/protocol',
+          'Recommendations for gas optimization'
+        ];
+        response.dataPoints = [
+          'Total SUI spent on gas',
+          'USD equivalent of gas costs',
+          'Gas cost distribution (low/medium/high)',
+          'Most gas-expensive apps',
+          'Time-based gas spending patterns'
+        ];
+        break;
+
+      case 'transaction_review':
+        response.focusAreas = [
+          'Transaction frequency and patterns',
+          'Success vs failed transactions',
+          'Types of activities performed',
+          'Apps and protocols used',
+          'Timeline of activities'
+        ];
+        response.dataPoints = [
+          'Total transaction count',
+          'Transaction success rate',
+          'Most used protocols',
+          'Transaction types distribution',
+          'Activity timeline'
+        ];
+        break;
+
+      case 'app_usage_analysis':
+        response.focusAreas = [
+          'Most frequently used applications',
+          'Gas cost per application',
+          'Transaction success rate per app',
+          'Value/utility analysis',
+          'Usage pattern recommendations'
+        ];
+        response.dataPoints = [
+          'App usage frequency ranking',
+          'Gas cost per app comparison',
+          'Transaction volume per app',
+          'User activity patterns',
+          'Cost-effectiveness analysis'
+        ];
+        break;
+    }
+
+    return response;
+  }
+
+  /**
+   * Format transaction data for better readability
+   */
+  static formatTransactionData(transactions: any[]): {
+    summary: TransactionSummary;
+    readableFormat: string;
+    insights: string[];
+  } {
+    if (!transactions || transactions.length === 0) {
+      return {
+        summary: {
+          totalTransactions: 0,
+          timeRange: { start: new Date(), end: new Date(), duration: '0 days' },
+          gasSpending: { total: 0, average: 0, currency: 'SUI' },
+          insights: ['No transaction data available'],
+          recommendations: ['Please provide transaction data for analysis']
+        },
+        readableFormat: 'No transactions to display',
+        insights: ['No data available for analysis']
+      };
+    }
+
+    const timestamps = transactions.map(tx => tx.timestamp).sort();
+    const startDate = new Date(timestamps[0]);
+    const endDate = new Date(timestamps[timestamps.length - 1]);
+    const durationDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+
+    const totalGas = transactions.reduce((sum, tx) => sum + (tx.gasFee || 0), 0);
+    const averageGas = totalGas / transactions.length;
+
+    const summary: TransactionSummary = {
+      totalTransactions: transactions.length,
+      timeRange: {
+        start: startDate,
+        end: endDate,
+        duration: `${durationDays} days`
+      },
+      gasSpending: {
+        total: totalGas,
+        average: averageGas,
+        currency: 'SUI'
+      },
+      insights: this.generateInsights(transactions),
+      recommendations: this.generateRecommendations(transactions)
+    };
+
+    const readableFormat = this.createReadableFormat(transactions, summary);
+
+    return {
+      summary,
+      readableFormat,
+      insights: summary.insights
+    };
+  }
+
+  private static generateInsights(transactions: any[]): string[] {
+    const insights: string[] = [];
+    
+    // Transaction frequency
+    if (transactions.length > 20) {
+      insights.push('High transaction activity - you are an active user');
+    } else if (transactions.length > 5) {
+      insights.push('Moderate transaction activity');
+    } else {
+      insights.push('Low transaction activity - consider exploring more DeFi opportunities');
+    }
+
+    // Gas efficiency
+    const totalGas = transactions.reduce((sum, tx) => sum + (tx.gasFee || 0), 0);
+    const avgGas = totalGas / transactions.length;
+    
+    if (avgGas > 0.01) {
+      insights.push('Gas costs are relatively high - consider optimizing transaction timing');
+    } else if (avgGas > 0.005) {
+      insights.push('Gas costs are moderate - good transaction efficiency');
+    } else {
+      insights.push('Excellent gas efficiency - you are making cost-effective transactions');
+    }
+
+    return insights;
+  }
+
+  private static generateRecommendations(transactions: any[]): string[] {
+    const recommendations: string[] = [];
+    
+    recommendations.push('Monitor gas prices and transact during low-fee periods');
+    recommendations.push('Consider batching multiple operations into single transactions');
+    recommendations.push('Review transaction patterns to identify optimization opportunities');
+    recommendations.push('Set up alerts for unusual transaction activity');
+    
+    return recommendations;
+  }
+
+  private static createReadableFormat(transactions: any[], summary: TransactionSummary): string {
+    return `
+# 📊 Your Sui Wallet Transaction Summary
+
+## 🔍 Overview
+- **Total Transactions**: ${summary.totalTransactions}
+- **Time Period**: ${summary.timeRange.start.toLocaleDateString()} to ${summary.timeRange.end.toLocaleDateString()}
+- **Duration**: ${summary.timeRange.duration}
+
+## 💰 Gas Spending Analysis
+- **Total Gas Spent**: ${summary.gasSpending.total.toFixed(4)} ${summary.gasSpending.currency}
+- **Average per Transaction**: ${summary.gasSpending.average.toFixed(4)} ${summary.gasSpending.currency}
+
+## 📈 Key Insights
+${summary.insights.map(insight => `- ${insight}`).join('\n')}
+
+## 💡 Recommendations
+${summary.recommendations.map(rec => `- ${rec}`).join('\n')}
+`;
+  }
+
+  private static parseSimpleStats(content: string): any {
+    const stats: Record<string, any> = { type: 'simple_stats' };
+    const lines = content.split('\n');
+    lines.forEach(line => {
+      if (line.includes('Total Transactions:')) {
+        const match = line.match(/Total Transactions: (\d+)/);
+        if (match) stats.totalTransactions = parseInt(match[1]);
+      }
+      // Add more parsing logic for other simple stats if needed
+    });
+    return stats;
   }
 }

@@ -14,7 +14,8 @@ export type IntentCategory =
   | "get_coin_data"
   | "get_nft_data"
   | "get_transaction_history"
-  | "unknown";
+  | "unknown"
+  | "undefined";
 
 /**
  * Represents the service for interacting with the AI model.
@@ -47,11 +48,12 @@ export class AIService {
           messages: [
             {
               role: "user",
-              content: `What is the intent of the following message: "${message}"? The categories are based on these parameters:
+              content: `What is the intent of the following message: "${message}"? The categories are based on these parameters and you should return only one of them:
+  - **undefined**: If the message is a general query, asks for information not covered by the other categories, or is not directly actionable within the defined intents.
   - **greeting**: A message that initiates a conversation or acknowledges the user.
   - **analyze_portfolio_risk**: A request to assess the risk associated with the user's investment portfolio, including factors like volatility, asset allocation, and potential losses.
   - **analyze_positions**: A request to evaluate specific pool portfolio user have on wallet and check it got any change to be liquidated or not, providing insights on individual assets. Give them advice to manage their positions.
-  - **get_coin_data**: A request to get the coin data for the user's wallet.
+  - **get_coin_data**: A request to retrieve specific data (e.g., price, balance, holdings) about cryptocurrencies *within the user's wallet* or for a *specific, named coin*.
   - **get_nft_data**: A request to get the nft data for the user's wallet.
   - **get_transaction_history**: A request to get the transaction history for the user's wallet.
   You should return only one of them.`,
@@ -77,6 +79,7 @@ export class AIService {
         "get_coin_data",
         "get_nft_data",
         "get_transaction_history",
+        "undefined",
       ];
 
       if (intent && validIntents.includes(intent as IntentCategory)) {
