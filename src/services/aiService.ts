@@ -1,6 +1,8 @@
 import axios from "axios";
 import dotenv from "dotenv";
-
+import mongoose from "mongoose";
+import { OpenAI } from "openai";
+import Room from '../models/roomModel';
 dotenv.config();
 
 /**
@@ -25,11 +27,15 @@ export type IntentCategory =
 export class AIService {
   private OPENAI_API_KEY: string;
   private OPENAI_MODEL: string;
+  private openai: OpenAI;
 
   constructor() {
     this.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
     // It's good practice to define the model as a configurable constant or env variable
     this.OPENAI_MODEL = "gpt-4.1-nano-2025-04-14";
+    this.openai = new OpenAI({
+      apiKey: this.OPENAI_API_KEY,
+    });
   }
 
   /**
@@ -122,5 +128,45 @@ export class AIService {
       console.error("Error calling AI API:", error);
       return "Error generating response.";
     }
+  }
+
+  async createEmbeddings(text: string): Promise<number[]> {
+    const response = await this.openai.embeddings.create({
+      model: 'text-embedding-3-small',
+      input: text
+    });
+    
+    return response.data[0].embedding;
+  }
+  
+  async findSimilarMessages(roomId: string, query: string, limit = 5) {
+    const queryEmbedding = await this.createEmbeddings(query);
+    
+    // Sử dụng vector similarity search
+    const similarMessages = await this.findSimilar(roomId, queryEmbedding, limit);
+    
+    return similarMessages;
+  }
+  async findSimilar(roomId: string, queryEmbedding: number[], limit: number = 5): Promise<any[]> {
+    // Note: Requires MongoDB Atlas với Vector Search setup
+    return await Room.aggregate([
+      {
+        $vectorSearch: {
+          index: 'message_embeddings_index',
+          path: 'embeddings',
+          queryVector: queryEmbedding,
+          numCandidates: 100,
+          limit: limit,
+          filter: {
+            roomId: new mongoose.Types.ObjectId(roomId)
+          }
+        }
+      },
+      {
+        $addFields: {
+          score: { $meta: 'vectorSearchScore' }
+        }
+      }
+    ]);
   }
 }

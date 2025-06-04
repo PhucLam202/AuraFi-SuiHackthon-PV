@@ -1,5 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from '@routers/index';
+import { registerRoutes } from 'src/routes/index';
 import cors from "cors";
 import dotenv from "dotenv";
 import { connectDB } from "@configs/db";

@@ -1,26 +1,58 @@
-import { WalletBalance } from "../types/getcoin";
 import { Message } from "../types/chat";
 import { AIService } from "./aiService";
 import { SuiDataService } from "./suiDataService";
-import { NFTAsset } from "../types/NFTs";
-import { Transaction } from "../types/transactionHistory";
+import { ErrorMessages } from "@middlewares/e/ErrorMessages";
+import { ErrorCode } from "@middlewares/e/ErrorCode";
+import { RoomRepository } from "../repository/RoomRepository";
+import mongoose from "mongoose";
+import { MessageRepository } from "../repository/MessageRepository";
+import Room from "../models/roomModel";
+import { v7 as uuidv7 } from 'uuid';
+
 class ChatService {
   private aiService: AIService;
   private suiDataService: SuiDataService;
-
+  private messageRepository: MessageRepository;
   constructor() {
     this.aiService = new AIService();
     this.suiDataService = new SuiDataService();
+    this.messageRepository = new MessageRepository();
   }
 
   public async processMessage(
     userAddress: string,
-    message: string
+    message: string,
+    roomId: string,
+    userId: string
   ): Promise<Message> {
-    const intent = await this.aiService.detectIntent(message);
-    console.log("intent", intent);
+    // 1. Validate room exists
+    const room = await new RoomRepository().findById(roomId);
+    if (!room) {
+      throw new Error(ErrorMessages[ErrorCode.ROOM_NOT_FOUND]);
+    }
+  
+    // 2. Get recent messages for context
+    const recentMessages = await this.messageRepository.findRecentByRoom(roomId, 10);
+    
+    // 3. Save user message FIRST
+    const userMessage = await this.messageRepository.create({
+      roomId: new mongoose.Types.ObjectId(roomId),
+      role: "user",
+      content: message,
+      userId: new mongoose.Types.ObjectId(userId),
+      embeddings: await this.aiService.createEmbeddings(message),
+    });
+  
+    // 4. Build conversation context (include new user message)
+    const conversationContext = [
+      ...recentMessages.map(msg => msg.content),
+      message // Add current user message to context
+    ].join("\n");
+  
+    // 5. Generate AI response based on intent
     let aiContent = "";
-
+    const intent = await this.aiService.detectIntent(message);
+  
     switch (intent) {
       case "greeting":
         aiContent = await this.generateGreeting();
@@ -41,23 +73,94 @@ class ChatService {
         aiContent = await this.analyzeTransactionHistory(userAddress);
         break;
       case "undefined":
-        aiContent = await this.aiService.generateAIResponse(message);
+        // Use conversation context for better AI response
+        aiContent = await this.aiService.generateAIResponse(conversationContext);
         break;
       default:
+        // Fallback to context-aware response
+        aiContent = await this.aiService.generateAIResponse(conversationContext);
         break;
     }
-
-    const responseMessage: Message = {
-      id: Date.now().toString(),
+  
+    // 6. Save AI message
+    const aiMessage = await this.messageRepository.create({
+      roomId: new mongoose.Types.ObjectId(roomId),
+      role: "assistant",
+      content: aiContent,
+      embeddings: await this.aiService.createEmbeddings(aiContent),
+    });
+  
+    // 7. Update room with new messages
+    await Room.findByIdAndUpdate(roomId, {
+      $push: {
+        messages: {
+          $each: [userMessage._id, aiMessage._id],
+          $position: -1,
+        },
+      },
+    });
+  
+    // 8. Update room context AFTER processing (optional - only if needed)
+    // This should be done asynchronously or conditionally
+    const shouldUpdateContext = recentMessages.length > 5; // Only update every few messages
+    if (shouldUpdateContext) {
+      const allMessages = [...recentMessages, userMessage, aiMessage];
+      const messagesText = allMessages.map(m => m.content).join("\n");
+      
+      // Run context update in background
+      this.updateRoomContextAsync(roomId, messagesText);
+    }
+  
+    // 9. Return response message using the actual AI message ID
+    return {
+      id: uuidv7(), // Use actual DB ID instead of random UUID
       from: "assistant",
       content: aiContent,
       avatar: "https://github.com/openai.png",
       name: "AI Assistant",
-      timestamp: new Date().toISOString(),
+      timestamp: aiMessage.createdAt?.toISOString() || new Date().toISOString(),
       codeBlocks: [],
     };
-
-    return responseMessage;
+  }
+  
+  // Helper method for async context update
+  private async updateRoomContextAsync(roomId: string, messagesText: string) {
+    try {
+      const summary = await this.aiService.generateAIResponse(
+        `Summarize the following conversation context: ${messagesText}`
+      );
+      
+      // Extract keywords (you can implement this logic)
+      const keywords = await this.extractKeywordsFromText(messagesText);
+      
+      await Room.findByIdAndUpdate(roomId, {
+        $set: {
+          "context.summary": summary,
+          "context.keywords": keywords,
+          "context.lastUpdated": new Date(),
+        },
+      });
+    } catch (error) {
+      console.error("Error updating room context:", error);
+      // Don't throw error - this is background operation
+    }
+  }
+  
+  private async extractKeywordsFromText(text: string): Promise<string[]> {
+    // Simple keyword extraction - you can make this more sophisticated
+    const words = text.toLowerCase().split(/\s+/);
+    const stopWords = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'];
+    const keywords = words
+      .filter(word => word.length > 3 && !stopWords.includes(word))
+      .reduce((acc, word) => {
+        acc[word] = (acc[word] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+    
+    return Object.entries(keywords)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 10)
+      .map(([word]) => word);
   }
 
   /**
@@ -152,23 +255,25 @@ class ChatService {
       return "Error analyzing positions";
     }
   }
-/**
+  /**
    * Analyzes and presents coin data in a user-friendly format
    */
-private async analyzeCoinData(userAddress: string): Promise<string> {
-  try {
-    const coinData = await this.suiDataService.getCoinData(userAddress);
-    
-    if (!coinData || coinData.length === 0) {
-      return "📊 **Portfolio Overview**: No coin holdings found in your wallet.";
-    }
+  private async analyzeCoinData(userAddress: string): Promise<string> {
+    try {
+      const coinData = await this.suiDataService.getCoinData(userAddress);
 
-    const prompt = `
+      if (!coinData || coinData.length === 0) {
+        return "📊 **Portfolio Overview**: No coin holdings found in your wallet.";
+      }
+
+      const prompt = `
       Analyze the following coin holdings and provide insights:
       ${coinData
         .map(
           (coin) =>
-            `- ${coin.coinType}: Balance ${coin.totalBalance}, Value: $${coin.totalBalance || 'N/A'}, 24h Change: ${coin.priceChangeH24 || 'N/A'}%`
+            `- ${coin.coinType}: Balance ${coin.totalBalance}, Value: $${
+              coin.totalBalance || "N/A"
+            }, 24h Change: ${coin.priceChangeH24 || "N/A"}%`
         )
         .join("\n")}
       First of all you show how many coins you have in your wallet and then you show the coinType.
@@ -181,31 +286,33 @@ private async analyzeCoinData(userAddress: string): Promise<string> {
       Format the response in markdown with clear sections and use emojis for better readability.
     `;
 
-    const analysis = await this.aiService.generateAIResponse(prompt);
-    return analysis;
-  } catch (error) {
-    console.error("Error fetching coin data:", error);
-    return "❌ **Error**: Unable to fetch coin data. Please check your wallet address and try again.";
+      const analysis = await this.aiService.generateAIResponse(prompt);
+      return analysis;
+    } catch (error) {
+      console.error("Error fetching coin data:", error);
+      return "❌ **Error**: Unable to fetch coin data. Please check your wallet address and try again.";
+    }
   }
-}
 
-/**
+  /**
    * Analyzes and presents NFT data in a user-friendly format
    */
-private async analyzeNFTData(userAddress: string): Promise<string> {
-  try {
-    const nftData = await this.suiDataService.getNFTs(userAddress);
-    
-    if (!nftData || nftData.length === 0) {
-      return "🖼️ **NFT Collection**: No NFTs found in your wallet.";
-    }
+  private async analyzeNFTData(userAddress: string): Promise<string> {
+    try {
+      const nftData = await this.suiDataService.getNFTs(userAddress);
 
-    const prompt = `
+      if (!nftData || nftData.length === 0) {
+        return "🖼️ **NFT Collection**: No NFTs found in your wallet.";
+      }
+
+      const prompt = `
       Analyze the following NFT collection:
       ${nftData
         .map(
           (nft, index) =>
-            `${index + 1}. ${nft.name || 'Unnamed NFT'} - Collection: ${nft.collection || 'Unknown'}, Type: ${nft.type || 'N/A'}`
+            `${index + 1}. ${nft.name || "Unnamed NFT"} - Collection: ${
+              nft.collection || "Unknown"
+            }, Type: ${nft.type || "N/A"}`
         )
         .join("\n")}
       First of all you show how many NFTs you have in your wallet and then you show the NFT collection.
@@ -218,26 +325,29 @@ private async analyzeNFTData(userAddress: string): Promise<string> {
       Format the response in markdown with clear sections and use emojis for better readability.
     `;
 
-    const analysis = await this.aiService.generateAIResponse(prompt);
-    return analysis;
-  } catch (error) {
-    console.error("Error fetching NFT data:", error);
-    return "❌ **Error**: Unable to fetch NFT data. Please check your wallet address and try again.";
+      const analysis = await this.aiService.generateAIResponse(prompt);
+      return analysis;
+    } catch (error) {
+      console.error("Error fetching NFT data:", error);
+      return "❌ **Error**: Unable to fetch NFT data. Please check your wallet address and try again.";
+    }
   }
-}
 
-    /**
+  /**
    * Analyzes and presents transaction history in a user-friendly format
    */
-    private async analyzeTransactionHistory(userAddress: string): Promise<string> {
-      try {
-        const transactionHistory = await this.suiDataService.getTransactionHistory(userAddress);
-        
-        if (!transactionHistory || transactionHistory.length === 0) {
-          return "📝 **Transaction History**: No recent transactions found for your wallet.";
-        }
-  
-        const prompt = `
+  private async analyzeTransactionHistory(
+    userAddress: string
+  ): Promise<string> {
+    try {
+      const transactionHistory =
+        await this.suiDataService.getTransactionHistory(userAddress);
+
+      if (!transactionHistory || transactionHistory.length === 0) {
+        return "📝 **Transaction History**: No recent transactions found for your wallet.";
+      }
+
+      const prompt = `
 You are a virtual financial assistant reviewing a user's recent on-chain transaction activity.
 
 Here is the user's 10 most recent transactions:
@@ -245,7 +355,9 @@ ${transactionHistory
   .slice(0, 10)
   .map(
     (tx, index) =>
-      `${index + 1}. Type: ${tx.type || 'Unknown'}, Status: ${tx.status || 'N/A'}, Date: ${tx.timestamp || 'N/A'}`
+      `${index + 1}. Type: ${tx.type || "Unknown"}, Status: ${
+        tx.status || "N/A"
+      }, Date: ${tx.timestamp || "N/A"}`
   )
   .join("\n")}
 
@@ -267,15 +379,14 @@ Your analysis should include:
 
 Keep the formatting clean using Markdown with emojis. Respond as if you're part of a smart wallet assistant app helping the user understand their blockchain footprint and make informed next steps.
 `;
-  
-        const analysis = await this.aiService.generateAIResponse(prompt);
-        return analysis;
-      } catch (error) {
-        console.error("Error fetching transaction history:", error);
-        return "❌ **Error**: Unable to fetch transaction history. Please check your wallet address and try again.";
-      }
+
+      const analysis = await this.aiService.generateAIResponse(prompt);
+      return analysis;
+    } catch (error) {
+      console.error("Error fetching transaction history:", error);
+      return "❌ **Error**: Unable to fetch transaction history. Please check your wallet address and try again.";
     }
-  
+  }
 }
 
 export default ChatService;
