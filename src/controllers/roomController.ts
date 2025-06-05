@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from "express";
 import { RoomService } from "../services/roomService"; 
 import { ErrorCode } from "@middlewares/e/ErrorCode";
 import { ErrorMessages } from "@middlewares/e/ErrorMessages";
+import mongoose from "mongoose";
 
 
 
@@ -54,47 +55,49 @@ class RoomController {
   ): Promise<void> {
     try {
       const customResponse = new CustomExpress(req, res, next);
-      const userId = req.headers['userid'] as string;
-      console.log("userId", userId);
-      const rooms = await this.roomService.getUserRooms(userId); 
-      console.log("roomsController", rooms);
-      if (rooms === null) {
-          customResponse.response400(ErrorCode.ROOM_NOT_FOUND, {
-            message: ErrorMessages[ErrorCode.ROOM_NOT_FOUND]
-          }); 
-      } else {
-          customResponse.response200(rooms); 
-      }
+      const userId = req.headers.userid as string;
 
+      const rooms = await this.roomService.getUserAllRooms(userId);
+      if (rooms.length === 0) {
+        customResponse.response404(ErrorCode.ROOM_NOT_FOUND, {
+          message: ErrorMessages[ErrorCode.ROOM_NOT_FOUND]
+        }); 
+        return;
+      } else {
+        customResponse.response200(rooms); 
+      }
     } catch (error) {
       next(error);
     }
   }
   
-  // Endpoint để lấy tin nhắn trong một room cụ thể
-  // Bạn có thể cần route này hoặc không, tùy thuộc vào cách bạn cấu trúc API chat
-  // Nếu API chat xử lý cả việc lấy lịch sử, thì có thể bỏ qua
-  /*
-  public async getRoomMessages(
+  public async getRoomById(
     req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> {
     try {
       const customResponse = new CustomExpress(req, res, next);
-      const roomId = req.params.roomId as string; // Lấy room id từ URL params
-      const userId = req.headers.userId as string; // Đảm bảo người dùng có quyền truy cập room này (logic trong RoomService)
-
-      // Bạn sẽ cần một phương thức trong RoomService để lấy tin nhắn theo RoomId
-      // const messages = await this.roomService.getMessagesByRoom(roomId, userId);
-      // customResponse.response200(messages);
-
-       customResponse.response501("Not Implemented Yet"); // Tạm thời 501 nếu chưa implement
+      const roomId = req.params.roomId as string; 
+      const userId = req.headers['userid'] as string; 
+      if (!roomId || !userId) {
+        customResponse.response400(ErrorCode.BAD_REQUEST, {
+          message: "Missing roomId or userId" 
+        });
+        return;
+      }
+      const room = await this.roomService.getRoomById(roomId, userId);
+      if (room === null) {
+        customResponse.response404(ErrorCode.ROOM_NOT_FOUND, { 
+          message: ErrorMessages[ErrorCode.ROOM_NOT_FOUND]
+        });
+      } else {
+        customResponse.response200(room); 
+      }
     } catch (error) {
       next(error);
     }
   }
-  */
 }
 
 export default RoomController; 

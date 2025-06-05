@@ -15,6 +15,9 @@ router.post('/',async (req: Request, res: Response, next: NextFunction) => {
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   roomController.getUserRooms(req, res, next);
 });
+router.get('/:roomId', async (req: Request, res: Response, next: NextFunction) => {
+  roomController.getRoomById(req, res, next);
+});
 router.post('/:roomId/messages', async (req: Request, res: Response, next: NextFunction) => {
     const chatController = new ChatController();
     chatController.processMessageInRoom(req, res, next);

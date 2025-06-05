@@ -33,13 +33,17 @@ export class RoomService {
 
     return room;
   }
-  async getUserRooms(userId: string) {
-    console.log("userId", userId);
+
+  async getUserAllRooms(userId: string) {
     return await Room.find({
       userId: new mongoose.Types.ObjectId(userId),
-    }).populate({
+    }).select("-messages");
+  }
+
+  async getRoomById(roomId: string, userId: string) {
+    return await Room.findById(roomId).populate({
       path: "messages",
-      options: { sort: { createdAt: -1 }, limit: 1 },
+      options: { sort: { createdAt: -1 }, limit: 10 },
     });
   }
 
@@ -82,56 +86,4 @@ export class RoomService {
     });
   }
 
-  async processMessageInRoom(
-    roomId: string,
-    userId: string,
-    messageContent: string
-  ) {
-    const room = await Room.findById(roomId);
-    if (!room) {
-      throw new Error(ErrorMessages[ErrorCode.ROOM_NOT_FOUND]);
-    }
-
-    const recentMessages = await this.messageRepository.findRecentByRoom(
-      roomId,
-      10
-    );
-
-    const userMessage = await this.messageRepository.create({
-      roomId: new mongoose.Types.ObjectId(roomId),
-      role: "user",
-      content: messageContent,
-      userId: new mongoose.Types.ObjectId(userId),
-      embeddings: await this.aiService.createEmbeddings(messageContent),
-    });
-
-    const conversationContext =
-      recentMessages.map((msg) => msg.content).join("\n") +
-      "\n" +
-      userMessage.content;
-
-    const aiResponseContent = await this.aiService.generateAIResponse(
-      conversationContext
-    );
-
-    const aiMessage = await this.messageRepository.create({
-      roomId: new mongoose.Types.ObjectId(roomId),
-      role: "assistant",
-      content: aiResponseContent,
-      embeddings: await this.aiService.createEmbeddings(aiResponseContent),
-    });
-    await Room.findByIdAndUpdate(
-      roomId,
-      {
-        $push: {
-          messages: {
-            $each: [userMessage._id, aiMessage._id], 
-            $position: -1, 
-          },
-        },
-      },
-      { new: true } 
-    );
-    return aiMessage;
-  }
 }

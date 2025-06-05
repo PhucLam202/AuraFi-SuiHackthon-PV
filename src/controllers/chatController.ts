@@ -11,22 +11,6 @@ class ChatController {
     this.roomService = new RoomService();
   }
 
-  // public async processMessage(
-  //   req: Request,
-  //   res: Response,
-  //   next: NextFunction
-  // ): Promise<void> {
-  //   try {
-  //     const customResponse = new CustomExpress(req, res, next);
-  //     const walletAddress = req.headers.walletaddress as string;
-  //     const message = req.body.message;
-  //     const responseMessage = await this.chatService.processMessage(walletAddress, message);
-
-  //     customResponse.response200(responseMessage);
-  //   } catch (error) {
-  //     next(error);
-  //   }
-  // }
 
   public async processMessageInRoom(
     req: Request,
