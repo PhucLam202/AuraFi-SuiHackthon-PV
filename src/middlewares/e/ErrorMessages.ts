@@ -36,4 +36,12 @@ export const ErrorMessages: { [key in ErrorCode]: string } = {
   [ErrorCode.AI_MODEL_TIMEOUT]: "AI model timeout",
   [ErrorCode.AI_RESPONSE_FORMAT_ERROR]: "AI response format error",
   [ErrorCode.AI_SERVICE_UNAVAILABLE]: "AI service unavailable",
+
+  [ErrorCode.ROOM_NOT_FOUND]: "Room not found",
+  [ErrorCode.ROOM_CREATION_FAILED]: "Room creation failed",
+  [ErrorCode.ROOM_UPDATE_FAILED]: "Room update failed",
+  [ErrorCode.ROOM_DELETION_FAILED]: "Room deletion failed",
+  [ErrorCode.ROOM_TITLE_REQUIRED]: "Room title is required",
+  [ErrorCode.ACCESS_TOKEN_REQUIRED]: "Access token required",
+  [ErrorCode.WALLET_AUTHENTICATION_FAILED]: "Wallet authentication failed",
 };

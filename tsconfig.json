@@ -34,7 +34,7 @@
       "@configs/*": ["src/configs/*"], 
       "@controllers/*": ["src/controllers/*"], 
       "@middlewares/*": ["src/middlewares/*"], 
-      "@routers/*": ["src/routers/*"], 
+      "@routers/*": ["src/routes/*"], 
       "@services/*": ["src/services/*"],
       "@types/*": ["src/types/*"]
     },                                    /* Specify a set of entries that re-map imports to additional lookup locations. */
