@@ -2,8 +2,8 @@ import { Schema, model, Document, Types } from 'mongoose';
 
 
   export interface IUser extends Document {
-    email: string;
-    password: string;
+    email?: string;
+    password?: string;
     name?: string;
     avatar?: string;
     suiAddress?: string;
@@ -35,12 +35,12 @@ interface IRole {
         sparse: true,
         lowercase: true,
         trim: true,
-        required: true,
+        required: false,
       },
       password: {
         type: String,
         select: false,
-        required: true,
+        required: false,
       },
       name: {
         type: String,

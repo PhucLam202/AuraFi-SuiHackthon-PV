@@ -26,7 +26,7 @@ export const ErrorMessages: { [key in ErrorCode]: string } = {
   [ErrorCode.USER_UPDATE_FAILED]: "Failed to update user",
   [ErrorCode.USER_DELETION_FAILED]: "Failed to delete user",
   [ErrorCode.INVALID_USER_DATA]: "Invalid user data provided",
-
+  [ErrorCode.USER_DELETED]: "User has been deleted",
   [ErrorCode.INVALID_INPUT]: "Invalid prompt input",
   [ErrorCode.QUOTA_EXCEEDED]: "Quota exceeded",
 
