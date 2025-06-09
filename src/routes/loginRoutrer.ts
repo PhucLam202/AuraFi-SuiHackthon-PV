@@ -21,5 +21,15 @@ loginRouter.post('/login', async (req: Request, res: Response, next: NextFunctio
 
 loginRouter.use(authenticateToken as any);
 
+loginRouter.get('/me', async (req: Request, res: Response, next: NextFunction) => {
+    loginController.getUser(req, res, next); 
+});
+loginRouter.patch('/updateUser', async (req: Request, res: Response, next: NextFunction) => {
+    loginController.updateUser(req, res, next); 
+});
+loginRouter.delete('/deleteUser', async (req: Request, res: Response, next: NextFunction) => {
+    loginController.deleteUser(req, res, next); 
+});
+
 
 export default loginRouter;

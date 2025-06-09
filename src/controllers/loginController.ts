@@ -66,7 +66,7 @@ class LoginController {
     try {
       const customResponse = new CustomExpress(req, res, next); 
       const data = req.body;     
-      const userId = req.headers.userId as string;
+      const userId = (req as any).user._id.toString();
       const responseMessage = await this.authService.updateUser(userId, data);
 
       customResponse.response200(responseMessage);
@@ -74,5 +74,37 @@ class LoginController {
       next(error);
     }
   }
-}
+
+  public async getUser(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const customResponse = new CustomExpress(req, res, next);
+      const userId = (req as any).user._id.toString();
+    
+      const responseMessage = await this.authService.getUser(userId);
+      customResponse.response200(responseMessage);
+
+    } catch (error) {
+      next(error);
+    }
+  }
+  public async deleteUser(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const customResponse = new CustomExpress(req, res, next); 
+      const userId = (req as any).user._id.toString();
+      const responseMessage = await this.authService.delete(userId);
+
+      customResponse.response200(responseMessage);
+    } catch (error) {
+      next(error);
+    }
+  }
+}   
 export default LoginController;
