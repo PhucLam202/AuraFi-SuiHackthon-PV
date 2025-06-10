@@ -6,6 +6,8 @@ import { IMessage } from "../models/messageModels";
 import { ErrorCode } from "@middlewares/e/ErrorCode";
 import { ErrorMessages } from "@middlewares/e/ErrorMessages";
 import User from "../models/userModel";
+import { AppError } from "@middlewares/e/AppError";
+import { StatusCodes } from "http-status-codes";
 
 export class RoomService {
   private aiService: AIService;
@@ -15,23 +17,38 @@ export class RoomService {
     this.messageRepository = new MessageRepository();
   }
   async createRoom(userId: string, title: string) {
-    const user = await User.findById(userId);
-    if (!user) {
-      throw new Error(ErrorMessages[ErrorCode.USER_NOT_FOUND]);
-    }
-    const room = await Room.create({
-      userId,
-      title,
-      isActive: true,
-      context: {
-        summary: "",
-        keywords: [],
-        userPreferences: {},
-        conversationStyle: "friendly",
-      },
-    });
+    try {
+      const user = await User.findById(userId);
+      if (!user) {
+        throw AppError.newError404(ErrorCode.USER_NOT_FOUND, "User not found");
+      }
+      const room = await Room.create({
+        userId,
+        title,
+        isActive: true,
+        context: {
+          summary: "",
+          keywords: [],
+          userPreferences: {},
+          conversationStyle: "friendly",
+        },
+      });
 
-    return room;
+      return room;
+    } catch (err) {
+      console.log(err);
+      if (!(err instanceof AppError)) {
+        throw new AppError(
+          `login error: ${
+            err instanceof Error ? err.message : "unknown error"
+          }`,
+          StatusCodes.INTERNAL_SERVER_ERROR,
+          ErrorCode.LOGIN_FAILED,
+          err instanceof Error ? err : undefined
+        );
+      }
+      throw err;
+    }
   }
 
   async getUserAllRooms(userId: string) {
@@ -48,42 +65,85 @@ export class RoomService {
   }
 
   async addMessage(roomId: string, role: string, content: string) {
-    const room = await Room.findById(roomId);
-    if (!room) {
-      throw new Error(ErrorMessages[ErrorCode.ROOM_NOT_FOUND]);
+    try {
+      const embeddings = await this.aiService.createEmbeddings(content);
+
+      const message = await this.messageRepository.create({
+        roomId: new mongoose.Types.ObjectId(roomId),
+        role,
+        content,
+        embeddings,
+      });
+
+      await this.updateRoomContext(roomId, message);
+
+      return message;
+    } catch (err) {
+      console.log(err);
+      if (!(err instanceof AppError)) {
+        throw new AppError(
+          `login error: ${
+            err instanceof Error ? err.message : "unknown error"
+          }`,
+          StatusCodes.INTERNAL_SERVER_ERROR,
+          ErrorCode.LOGIN_FAILED,
+          err instanceof Error ? err : undefined
+        );
+      }
+      throw err;
     }
-
-    const embeddings = await this.aiService.createEmbeddings(content);
-
-    const message = await this.messageRepository.create({
-      roomId: new mongoose.Types.ObjectId(roomId),
-      role,
-      content,
-      embeddings,
-    });
-
-    await this.updateRoomContext(roomId, message);
-
-    return message;
   }
 
   private async updateRoomContext(roomId: string, newMessage: IMessage) {
-    const recentMessages = await this.messageRepository.findRecentByRoom(
-      roomId,
-      10
-    );
+    try {
+      const recentMessages = await this.messageRepository.findRecentByRoom(
+        roomId,
+        10
+      );
 
-    const analysis = await this.aiService.generateAIResponse(
-      recentMessages.map((message) => message.content).join("\n")
-    );
+      const analysis = await this.aiService.generateAIResponse(
+        recentMessages.map((message) => message.content).join("\n")
+      );
 
-    await Room.findByIdAndUpdate(roomId, {
-      context: {
-        summary: analysis,
-        keywords: [],
-        userPreferences: {},
-      },
-    });
+      await Room.findByIdAndUpdate(roomId, {
+        context: {
+          summary: analysis,
+          keywords: [],
+          userPreferences: {},
+        },
+      });
+    } catch (err) {
+      console.log(err);
+      if (!(err instanceof AppError)) {
+        throw new AppError(
+          `login error: ${
+            err instanceof Error ? err.message : "unknown error"
+          }`,
+          StatusCodes.INTERNAL_SERVER_ERROR,
+          ErrorCode.LOGIN_FAILED,
+          err instanceof Error ? err : undefined
+        );
+      }
+      throw err;
+    }
   }
-
+  public async deleteRoom(roomId: string) {
+    try {
+      const room = await Room.findByIdAndDelete(roomId);
+      if (!room) {
+        throw AppError.newError404(ErrorCode.ROOM_NOT_FOUND, "Room not found");
+      }
+    } catch (err) {
+      console.log(err);
+      if (!(err instanceof AppError)) {
+        throw new AppError(
+          `login error: ${err instanceof Error ? err.message : "unknown error"}`,
+          StatusCodes.INTERNAL_SERVER_ERROR,
+          ErrorCode.LOGIN_FAILED,
+          err instanceof Error ? err : undefined
+        );
+      }
+      throw err;
+    }
+  }
 }

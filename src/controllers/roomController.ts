@@ -98,6 +98,29 @@ class RoomController {
       next(error);
     }
   }
+    public async deleteRoom(
+      req: Request,
+      res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const customResponse = new CustomExpress(req, res, next);
+      const roomId = req.params.roomId as string;
+      const userId = req.headers['userid'] as string;
+      if (!roomId || !userId) {
+        customResponse.response400(ErrorCode.BAD_REQUEST, {
+          message: "Missing roomId or userId" 
+        });
+        return;
+      }
+      const result = await this.roomService.deleteRoom(roomId);
+      customResponse.response200({
+        message: "Room deleted successfully"
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export default RoomController; 

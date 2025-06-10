@@ -44,11 +44,11 @@ export class AuthService {
 
   public async login(email: string, password: string): Promise<any> {
     console.log("Attempting login for email:", email);
-  
+
     try {
       const user = await User.findOne({ email }).select("+password");
       console.log("User found:", user); // Debug
-  
+
       if (!user) {
         throw new AppError(
           ErrorMessages[ErrorCode.USER_NOT_FOUND],
@@ -56,7 +56,7 @@ export class AuthService {
           ErrorCode.USER_NOT_FOUND
         );
       }
-  
+
       if (user.authType === "wallet") {
         let message = `This account is registered with a wallet. Please login with your Sui wallet.`;
         if (user.suiAddress) {
@@ -64,8 +64,11 @@ export class AuthService {
         }
         throw AppError.newError400(ErrorCode.AUTH_TYPE_MISMATCH, message);
       }
-  
-      const passwordMatch = await bcrypt.compare(password, user.password as string);
+
+      const passwordMatch = await bcrypt.compare(
+        password,
+        user.password as string
+      );
       console.log("Password match:", passwordMatch); // Debug
       if (!passwordMatch) {
         throw AppError.newError400(
@@ -73,13 +76,13 @@ export class AuthService {
           "Invalid credentials"
         );
       }
-  
+
       const token = jwt.sign(
         { userId: user._id, email: user.email },
         this.JWT_SECRET,
         { expiresIn: "1d" }
       );
-  
+
       return {
         user: {
           id: user._id,
@@ -98,13 +101,15 @@ export class AuthService {
       console.error("Error in login:", err);
       if (!(err instanceof AppError)) {
         throw new AppError(
-          `login error: ${err instanceof Error ? err.message : "unknown error"}`,
+          `login error: ${
+            err instanceof Error ? err.message : "unknown error"
+          }`,
           StatusCodes.INTERNAL_SERVER_ERROR,
           ErrorCode.LOGIN_FAILED,
           err instanceof Error ? err : undefined
         );
       }
-        throw err; 
+      throw err;
     }
   }
   // NEW: Sui Wallet Authentication
@@ -147,9 +152,19 @@ export class AuthService {
         },
         token: token,
       };
-    } catch (error) {
-      console.log(error);
-      throw new Error(ErrorMessages[ErrorCode.WALLET_AUTHENTICATION_FAILED]);
+    } catch (err) {
+      console.log(err);
+      if (!(err instanceof AppError)) {
+        throw new AppError(
+          `login error: ${
+            err instanceof Error ? err.message : "unknown error"
+          }`,
+          StatusCodes.INTERNAL_SERVER_ERROR,
+          ErrorCode.LOGIN_FAILED,
+          err instanceof Error ? err : undefined
+        );
+      }
+      throw err;
     }
   }
 
@@ -178,15 +193,30 @@ export class AuthService {
   }
 
   async delete(userId: string) {
-    const result = await User.findByIdAndUpdate(
-      userId,
-      { isDeleted: true },
-      { new: true }
-    );
-    if (!result) {
-      throw new Error(ErrorMessages[ErrorCode.USER_NOT_FOUND]);
+    try {
+      const result = await User.findByIdAndUpdate(
+        userId,
+        { isDeleted: true },
+        { new: true }
+      );
+      if (!result) {
+        throw AppError.newError404(ErrorCode.USER_NOT_FOUND, "User not found");
+      }
+      return { message: "User marked as deleted successfully" };
+    } catch (err) {
+      console.log(err);
+      if (!(err instanceof AppError)) {
+        throw new AppError(
+          `login error: ${
+            err instanceof Error ? err.message : "unknown error"
+          }`,
+          StatusCodes.INTERNAL_SERVER_ERROR,
+          ErrorCode.LOGIN_FAILED,
+          err instanceof Error ? err : undefined
+        );
+      }
+      throw err;
     }
-    return { message: "User marked as deleted successfully" };
   }
 
   async getUser(userId: string) {
@@ -196,16 +226,20 @@ export class AuthService {
     }
     try {
       if (!user) {
-        throw new AppError(
-          ErrorMessages[ErrorCode.USER_NOT_FOUND],
-          StatusCodes.NOT_FOUND,
-          ErrorCode.USER_NOT_FOUND
-        );
+        throw AppError.newError404(ErrorCode.USER_NOT_FOUND, "User not found");
       }
       return user.toJSON();
-    } catch (error) {
-      console.log(error);
-      throw new Error(ErrorMessages[ErrorCode.USER_NOT_FOUND]);
+    } catch (err) {
+      console.log(err);
+      if (!(err instanceof AppError)) {
+        throw new AppError(
+          `login error: ${err instanceof Error ? err.message : "unknown error"}`,
+          StatusCodes.INTERNAL_SERVER_ERROR,
+          ErrorCode.LOGIN_FAILED,
+          err instanceof Error ? err : undefined
+        );
+      }
+      throw err;
     }
   }
 }
