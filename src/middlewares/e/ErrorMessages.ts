@@ -18,6 +18,7 @@ export const ErrorMessages: { [key in ErrorCode]: string } = {
   [ErrorCode.ACCOUNT_LOCKED]: "Account has been locked",
   [ErrorCode.ACCOUNT_DISABLED]: "Account has been disabled",
   [ErrorCode.PASSWORD_EXPIRED]: "Password has expired and needs to be reset",
+  [ErrorCode.AUTH_TYPE_MISMATCH]: "Authentication type mismatch",
   
   // User Related Errors
   [ErrorCode.USER_NOT_FOUND]: "User not found",
@@ -44,4 +45,5 @@ export const ErrorMessages: { [key in ErrorCode]: string } = {
   [ErrorCode.ROOM_TITLE_REQUIRED]: "Room title is required",
   [ErrorCode.ACCESS_TOKEN_REQUIRED]: "Access token required",
   [ErrorCode.WALLET_AUTHENTICATION_FAILED]: "Wallet authentication failed",
+  [ErrorCode.LOGIN_FAILED]: "Login failed", 
 };
