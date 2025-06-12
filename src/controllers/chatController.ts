@@ -22,7 +22,7 @@ class ChatController {
 
       //get data of user form body and headers (userId, walletAddress, messageContent)
       const roomId = req.params.roomId as string; 
-      const userId = req.headers['userid'] as string; 
+      const userId = (req as any).userId as string;
       const walletAddress = req.headers.walletaddress as string;
       const { messageContent } = req.body; 
       const responseMessage = await this.chatService.processMessage(walletAddress, messageContent, roomId, userId);

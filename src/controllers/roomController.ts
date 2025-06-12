@@ -21,8 +21,7 @@ class RoomController {
   ): Promise<void> {
     try {
       const customResponse = new CustomExpress(req, res, next);
-      const userId = req.headers['userid'] as string;
-      console.log("userId", userId);
+      const userId = (req as any).userId as string;
       if (!req.body || !req.body.title) {
         customResponse.response400(ErrorCode.ROOM_TITLE_REQUIRED, {
           title: ErrorMessages[ErrorCode.ROOM_TITLE_REQUIRED]
@@ -31,9 +30,7 @@ class RoomController {
       }
 
       const { title } = req.body;
-      console.log("title", title);
       const newRoom = await this.roomService.createRoom(userId, title);
-      console.log("newRoom", newRoom);
       if(newRoom){
         customResponse.response200(newRoom); 
       }else{
@@ -55,8 +52,7 @@ class RoomController {
   ): Promise<void> {
     try {
       const customResponse = new CustomExpress(req, res, next);
-      const userId = req.headers.userid as string;
-
+      const userId = (req as any).userId as string; 
       const rooms = await this.roomService.getUserAllRooms(userId);
       if (rooms.length === 0) {
         customResponse.response404(ErrorCode.ROOM_NOT_FOUND, {
@@ -79,7 +75,7 @@ class RoomController {
     try {
       const customResponse = new CustomExpress(req, res, next);
       const roomId = req.params.roomId as string; 
-      const userId = req.headers['userid'] as string; 
+      const userId = (req as any).userId as string; 
       if (!roomId || !userId) {
         customResponse.response400(ErrorCode.BAD_REQUEST, {
           message: "Missing roomId or userId" 
@@ -106,7 +102,7 @@ class RoomController {
     try {
       const customResponse = new CustomExpress(req, res, next);
       const roomId = req.params.roomId as string;
-      const userId = req.headers['userid'] as string;
+      const userId = (req as any).userId as string;
       if (!roomId || !userId) {
         customResponse.response400(ErrorCode.BAD_REQUEST, {
           message: "Missing roomId or userId" 
@@ -121,6 +117,35 @@ class RoomController {
       next(error);
     }
   }
-}
+  public async updateRoom(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const customResponse = new CustomExpress(req, res, next);
+      const roomId = req.params.roomId as string;
+      const userId = (req as any).userId as string;
+      if (!roomId || !userId) {
+        customResponse.response400(ErrorCode.BAD_REQUEST, {
+          message: "Missing roomId or userId" 
+        });
+        return;
+      }
+      const result = await this.roomService.updateRoom(roomId, userId, req.body);
+      if(result){
+        customResponse.response200({
+          message: "Room updated successfully"
+        });
+      }else{
+        customResponse.response400(ErrorCode.ROOM_UPDATE_FAILED, {
+          message: "Room update failed"
+        });
+      }
+    } catch (error) {
+      next(error);
+    }
+  }
+  }
 
 export default RoomController; 

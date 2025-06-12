@@ -12,9 +12,12 @@ import { v7 as uuidv7 } from 'uuid';
 class ChatService {
   private aiService: AIService;
   private suiDataService: SuiDataService;
+  private messageRepository: MessageRepository;
+
   constructor() {
     this.aiService = new AIService();
     this.suiDataService = new SuiDataService();
+    this.messageRepository = new MessageRepository();
   }
 
   public async processMessage(
@@ -29,22 +32,19 @@ class ChatService {
       throw new Error(ErrorMessages[ErrorCode.ROOM_NOT_FOUND]);
     }
     
-    // 2. Get recent messages for context from EMBEDDED messages
-    const recentMessages = room.messages ? room.messages.slice(-10) : [];
+    // 2. Get recent messages for context
+    const recentMessages = await this.messageRepository.findRecentByRoom(roomId, 10);
     
-    // 3. Prepare user message object (DO NOT save separately if schema is embedded)
-    const userMessageObject = {
-      _id: new mongoose.Types.ObjectId(),
+    // 3. Create and save user message
+    const userMessage = await this.messageRepository.create({
       roomId: new mongoose.Types.ObjectId(roomId),
-      role: "user" as const,
+      role: "user",
       content: message,
       userId: new mongoose.Types.ObjectId(userId),
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-     console.log("userMessageObject", userMessageObject);
+      embeddings: await this.aiService.createEmbeddings(message)
+    });
 
-    // 4. Build conversation context (include new user message)
+    // 4. Build conversation context
     const conversationContext = [
       ...recentMessages.map(msg => msg.content),
       message
@@ -84,29 +84,23 @@ class ChatService {
         break;
       case "undefined":
       default:
-        // Use conversation context for better AI response
         aiContent = await this.aiService.generateAIResponse(conversationContext);
         break;
     }
-    console.log("aiContent", aiContent);
 
-    // 6. Prepare AI message object (DO NOT save separately)
-    const aiMessageObject = {
-      _id: new mongoose.Types.ObjectId(),
+    // 6. Create and save AI message
+    const aiMessage = await this.messageRepository.create({
       roomId: new mongoose.Types.ObjectId(roomId),
-      role: "assistant" as const,
+      role: "assistant",
       content: aiContent,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    console.log("aiMessageObject", aiMessageObject);
+      embeddings: await this.aiService.createEmbeddings(aiContent)
+    });
 
-    // 7. Update room with new messages - Push EMBEDDED objects
+    // 7. Update room with message references
     await Room.findByIdAndUpdate(roomId, {
       $push: {
         messages: {
-          $each: [userMessageObject, aiMessageObject],
-          $position: -1
+          $each: [userMessage._id, aiMessage._id]
         }
       },
       $set: {
@@ -114,25 +108,19 @@ class ChatService {
       }
     });
     
-    // 8. Update room context AFTER processing (optional - only if needed)
-    const updatedRoom = await Room.findById(roomId);
-    const allMessagesInRoom = updatedRoom?.messages || [];
-    const shouldUpdateContext = allMessagesInRoom.length > 5;
-
-    if (shouldUpdateContext) {
-        const messagesTextForContext = allMessagesInRoom.map(m => m.content).join("\n");
-        console.log("messagesTextForContext", messagesTextForContext);
-        this.updateRoomContextAsync(roomId, messagesTextForContext);
+    // 8. Update room context if needed
+    if (recentMessages.length > 5) {
+      this.updateRoomContextAsync(roomId, conversationContext);
     }
 
-    // 9. Return response message using the actual AI message content and generated ID for client
+    // 9. Return response message
     return {
       id: uuidv7(),
       from: "assistant",
       content: aiContent,
       avatar: "https://github.com/openai.png",
       name: "AI Assistant",
-      timestamp: aiMessageObject.createdAt.toISOString(),
+      timestamp: aiMessage.createdAt.toISOString(),
       codeBlocks: [],
     };
   }

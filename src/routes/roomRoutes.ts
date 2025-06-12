@@ -25,5 +25,8 @@ router.post('/:roomId/messages', async (req: Request, res: Response, next: NextF
 router.delete('/:roomId', async (req: Request, res: Response, next: NextFunction) => {
   roomController.deleteRoom(req, res, next);
 });
+router.put('/:roomId', async (req: Request, res: Response, next: NextFunction) => {
+  roomController.updateRoom(req, res, next);
+});
 
 export default router; 

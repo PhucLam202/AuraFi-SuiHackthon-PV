@@ -30,6 +30,8 @@ export const authenticateToken = async (req: Request, res: Response, next: NextF
       }
       
       (req as any).user = user;
+      (req as any).userId = decoded.userId;
+
       next();
     } catch (error) {
       return res.status(403).json({ error: 'Invalid token' });

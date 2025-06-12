@@ -146,4 +146,47 @@ export class RoomService {
       throw err;
     }
   }
+  public async updateRoom(roomId: string, userId: string, updateData: Partial<{
+    title: string;
+    isActive: boolean;
+    description: string;
+  }>) {
+    try {
+      const room = await Room.findOne({
+        _id: new mongoose.Types.ObjectId(roomId),
+        userId: new mongoose.Types.ObjectId(userId)
+      });
+
+      if (!room) {
+        throw AppError.newError404(ErrorCode.ROOM_NOT_FOUND, "Room not found or you don't have permission");
+      }
+
+      const updatedRoom = await Room.findByIdAndUpdate(
+        roomId,
+        { 
+          $set: {
+            ...updateData,
+            updatedAt: new Date()
+          }
+        },
+        { new: true }
+      );
+
+      if (!updatedRoom) {
+        throw AppError.newError500(ErrorCode.ROOM_UPDATE_FAILED, "Failed to update room");
+      }
+
+      return updatedRoom;
+    } catch (err) {
+      if (err instanceof AppError) {
+        throw err;
+      }
+      throw new AppError(
+        `Update room error: ${err instanceof Error ? err.message : "unknown error"}`,
+        StatusCodes.INTERNAL_SERVER_ERROR,
+        ErrorCode.ROOM_UPDATE_FAILED,
+        err instanceof Error ? err : undefined
+      );
+    }
+  }
 }
